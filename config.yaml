@@ -1,0 +1,39 @@
+model:
+  context_size: 256
+  n_layer: 6
+  n_head: 6
+  n_embed: 384
+  dropout: 0.2
+
+tokenizer:
+  type: char  # char, word, bpe, etc.
+  vocab_size: 0  # To be updated dynamically based on tokenizer
+  vocab_path: tokenizer_vocab.json
+
+training:
+  max_steps: 10000
+  batch_size: 128
+  optimizer:
+    type: AdamW  # SGD, Adam, AdamW, etc.
+    params:
+      lr: 0.001
+      weight_decay: 0.01
+  scheduler:
+    type: cosine
+    warmup_ratio: 0.1
+  grad_clip: 1.0
+  mixed_precision: true
+  validation_interval: 1000
+  checkpoint_interval: 1000
+  checkpoint_dir: checkpoints
+  log_interval: 100
+  log_file: logs/training.logs
+  seed: 42
+
+data:
+  train_path: data/raw/shakespeare.txt
+  val_size: 0.1
+
+wandb:
+  project: nanoGPT
+  entity: pathfinderkr
