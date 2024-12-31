@@ -196,27 +196,33 @@ def initialize_model(config: dict, device: torch.device, model_type: str) -> tor
     return model
 
 
-def save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
-                    scheduler: torch.optim.lr_scheduler.SequentialLR,
-                    scaler: torch.cuda.amp.GradScaler, step: int, loss: float,
-                    checkpoint_path: str):
+def save_checkpoint(
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.SequentialLR,
+        step: int,
+        loss: float,
+        checkpoint_path: str
+):
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     checkpoint = {
         'step': step,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'scheduler_state_dict': scheduler.state_dict(),
-        'scaler_state_dict': scaler.state_dict(),
         'loss': loss
     }
     torch.save(checkpoint, checkpoint_path)
     logging.info(f"Checkpoint saved at step {step} to {checkpoint_path}.")
 
 
-def load_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
-                    scheduler: torch.optim.lr_scheduler.SequentialLR,
-                    scaler: torch.cuda.amp.GradScaler, checkpoint_path: str,
-                    device: torch.device) -> Dict[str, Any]:
+def load_checkpoint(
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.SequentialLR,
+        checkpoint_path: str,
+        device: torch.device
+) -> Dict[str, Any]:
     if not os.path.isfile(checkpoint_path):
         logging.error(f"Checkpoint file not found: {checkpoint_path}")
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
@@ -226,7 +232,6 @@ def load_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        scaler.load_state_dict(checkpoint['scaler_state_dict'])
     except KeyError as e:
         logging.error(f"Missing key in checkpoint: {e}")
         raise

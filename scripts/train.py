@@ -23,7 +23,7 @@ from utils import (
     save_checkpoint,
     load_checkpoint
 )
-from tokenizer import CharTokenizer
+from tokenizer import CharTokenizer, BpeTokenizer
 
 
 def parse_args():
@@ -93,7 +93,7 @@ class TextDataset(Dataset):
         return input_ids, target_ids
 
 
-def prepare_data(raw_text: str, config: dict, tokenizer: CharTokenizer) -> Tuple[DataLoader, DataLoader]:
+def prepare_data(raw_text: str, config: dict, tokenizer: CharTokenizer | BpeTokenizer) -> Tuple[DataLoader, DataLoader]:
     """
     Encodes the raw text data, splits it into training and validation sets,
     and creates DataLoaders for both.
@@ -101,7 +101,7 @@ def prepare_data(raw_text: str, config: dict, tokenizer: CharTokenizer) -> Tuple
     Args:
         raw_text (str): The raw text data to be encoded and split.
         config (dict): Configuration parameters.
-        tokenizer (CharTokenizer): The tokenizer for encoding the text.
+        tokenizer (CharTokenizer | BpeTokenizer): The tokenizer for encoding the text.
 
     Returns:
         Tuple[DataLoader, DataLoader]: Training and validation DataLoaders.
@@ -167,20 +167,20 @@ def setup_optimizer(config: dict, model) -> optim.Optimizer:
     return optimizer
 
 
-def setup_scheduler(config: dict, optimizer: optim.Optimizer, total_steps: int) -> SequentialLR | LinearLR:
+def setup_scheduler(config: dict, optimizer: optim.Optimizer) -> SequentialLR | LinearLR:
     """
     Sets up the learning rate scheduler based on the configuration.
 
     Args:
         config (dict): Configuration parameters.
         optimizer (optim.Optimizer): The optimizer.
-        total_steps (int): Total number of training steps.
 
     Returns:
         SequentialLR | LinearLR: The instantiated scheduler.
     """
     scheduler_type = config['training']['scheduler'].get('type', 'none')  # Default to none
     warmup_ratio = config['training']['scheduler'].get('warmup_ratio', 0.0)  # Default to 0.0
+    total_steps = config['training']['max_steps']
     warmup_steps = int(warmup_ratio * total_steps)
     remaining_steps = total_steps - warmup_steps
 
@@ -228,7 +228,7 @@ def setup_scheduler(config: dict, optimizer: optim.Optimizer, total_steps: int) 
 
 
 def resume_training(model, optimizer: optim.Optimizer, scheduler: SequentialLR | LinearLR,
-                    scaler: torch.cuda.amp.GradScaler, checkpoint_path: str, device: torch.device) \
+                    config: dict, checkpoint_path: str, device: torch.device) \
         -> Union[Tuple[int, float], Tuple[int, None]]:
     """
     Optionally resumes training from a checkpoint if a path is provided.
@@ -237,7 +237,7 @@ def resume_training(model, optimizer: optim.Optimizer, scheduler: SequentialLR |
         model (torch.nn.Module): The model.
         optimizer (optim.Optimizer): The optimizer.
         scheduler (SequentialLR): The scheduler.
-        scaler (torch.cuda.amp.GradScaler): The scaler for mixed precision.
+        config (dict): Configuration parameters.
         checkpoint_path (str): Path to the checkpoint file.
         device (torch.device): The device to load the checkpoint on.
 
@@ -245,7 +245,7 @@ def resume_training(model, optimizer: optim.Optimizer, scheduler: SequentialLR |
         Union[Tuple[int, float], Tuple[int, None]]: The starting step and loss value.
     """
     if checkpoint_path:
-        checkpoint = load_checkpoint(model, optimizer, scheduler, scaler, checkpoint_path, device)
+        checkpoint = load_checkpoint(model, optimizer, scheduler, checkpoint_path, device)
         start_step = checkpoint.get('step', 0) + 1  # Start from the next step after the checkpoint
         loss = checkpoint.get('loss', None)
 
@@ -263,7 +263,7 @@ def evaluate(model, dataloader: DataLoader, device: torch.device) -> float:
     Evaluates the model on the validation dataset.
 
     Args:
-        model (torch.nn.Module): The GPT model to evaluate.
+        model (torch.nn.Module): The model to evaluate.
         dataloader (DataLoader): DataLoader for the validation data.
         device (torch.device): The device to run evaluation on.
 
@@ -293,9 +293,9 @@ def train(
         optimizer: optim.Optimizer,
         scheduler: SequentialLR,
         config: dict,
-        device: torch.device,
+        start_step: int,
         wandb_run: wandb.sdk.wandb_run.Run,
-        start_step: int
+        device: torch.device,
 ):
     """
     The main training loop for the GPT model, including validation.
@@ -312,12 +312,14 @@ def train(
         start_step (int): The step to start training from.
     """
     max_steps = config['training']['max_steps']
+
     checkpoint_dir = os.path.join(
         os.path.abspath(os.path.join(os.path.dirname(__file__), '..')),
         config['training']['checkpoint_dir'],
         config['model']['name']
     )
     os.makedirs(checkpoint_dir, exist_ok=True)
+
     checkpoint_interval = config['training'].get('checkpoint_interval', 1000)  # Default to 1000
     validation_interval = config['training'].get('validation_interval', 1000)  # Default to 1000
     log_interval = config['training'].get('log_interval', 100)  # Default to 100
@@ -325,6 +327,7 @@ def train(
     grad_clip = config['training'].get('grad_clip', 0)  # Default to 0
     if grad_clip > 0:
         logging.info(f"Gradient clipping enabled with max norm: {grad_clip}")
+
     mixed_precision = config['training'].get('mixed_precision', True) and device.type == 'cuda'  # Default to True
     if mixed_precision:
         logging.info("Mixed precision training enabled.")
@@ -337,14 +340,12 @@ def train(
 
     logging.info("Starting training loop.")
 
-    # Initialize a tqdm progress bar for the entire training process
     progress_bar = tqdm(
         range(start_step, max_steps),
         desc="Training",
         total=max_steps - start_step,
         initial=start_step
     )
-
     for step in progress_bar:
         current_step = step + 1
         inputs, targets = next(train_iterator)
@@ -406,7 +407,7 @@ def train(
         # Save checkpoint at specified intervals
         if current_step % checkpoint_interval == 0:
             checkpoint_path = os.path.join(checkpoint_dir, f'step_{current_step}.pth')
-            save_checkpoint(model, optimizer, scheduler, scaler, current_step, loss.item(), checkpoint_path)
+            save_checkpoint(model, optimizer, scheduler, current_step, loss.item(), checkpoint_path)
             logging.info(f"Checkpoint saved at {checkpoint_path}.")
             try:
                 wandb_run.save(checkpoint_path)
@@ -447,8 +448,7 @@ def main():
                 raise ValueError(f"Missing required key '{nested_key}' in configuration section '{key}'.")
 
     # Logging configuration
-    log_file_path = os.path.join(root_dir, config['training']['log_file'])
-    setup_logging(log_file_path)
+    setup_logging(os.path.join(root_dir, config['training']['log_file']))
 
     # Set the random seed for reproducibility
     set_seed(config['training'].get('seed', 42))  # Default to 42
@@ -456,7 +456,7 @@ def main():
     # Device configuration
     device = configure_device()
 
-    # Debug mode adjustments
+    # Debug mode
     if args.debug:
         config['training']['max_steps'] = 1000
         config['training']['batch_size'] = 8
@@ -475,40 +475,23 @@ def main():
     wandb_run = wandb.run
     logging.info("Weights & Biases initialized.")
 
-    # Initialize tokenizer
-    tokenizer_type = config['tokenizer']['type']
-    tokenizer = initialize_tokenizer(config, root_dir, tokenizer_type)
+    # Initialize tokenizer and model
+    tokenizer = initialize_tokenizer(config, root_dir, config['tokenizer']['type'])
+    model = initialize_model(config, device, config['model']['arch'])
 
     # Load and prepare data
-    train_path = os.path.join(root_dir, config['data']['train_path'])
-    raw_text = load_text(train_path)
+    raw_text = load_text(os.path.join(root_dir, config['data']['train_path']))
     train_dataloader, val_dataloader = prepare_data(raw_text, config, tokenizer)
 
-    # Update vocab_size in config based on tokenizer
-    config['model']['vocab_size'] = tokenizer.vocab_size
-
-    # Initialize the GPT model based on the selected model type
-    model_architecture = config['model']['arch']
-    model = initialize_model(config, device, model_architecture)
-
-    # Set up the optimizer
+    # Set up the optimizer and scheduler
     optimizer = setup_optimizer(config, model)
-
-    # Set up the scheduler
-    total_steps = config['training']['max_steps']
-    scheduler = setup_scheduler(config, optimizer, total_steps)
-
-    # Initialize the GradScaler for mixed precision training
-    mixed_precision = config['training'].get('mixed_precision', True) and device.type == 'cuda'
-    scaler = torch.cuda.amp.GradScaler(enabled=mixed_precision)
+    scheduler = setup_scheduler(config, optimizer)
 
     # Optionally resume training from a checkpoint
     if args.resume:
-        start_step, loss = resume_training(model, optimizer, scheduler, scaler, args.resume, device)
+        start_step, loss = resume_training(model, optimizer, scheduler, config, args.resume, device)
     else:
         start_step, loss = 0, None
-
-    config['training']['start_step'] = start_step
 
     # Train the model
     try:
@@ -519,9 +502,9 @@ def main():
             optimizer,
             scheduler,
             config,
-            device,
+            start_step,
             wandb_run,
-            start_step
+            device
         )
     except Exception as e:
         logging.error(f"An error occurred during training: {e}")
