@@ -463,11 +463,10 @@ def main():
         logging.info("Debug mode enabled")
 
     # Weights & Biases initialization
-    wandb_project = config.get('wandb', {}).get('project', 'default_project')
-    wandb_entity = config.get('wandb', {}).get('entity', None)
+    wandb.login(key=os.getenv("WANDB_API_KEY"))
     wandb.init(
-        project=wandb_project,
-        entity=wandb_entity,
+        project=config.get('wandb', {}).get('project', 'default_project'),
+        entity=config.get('wandb', {}).get('entity', None),
         config=config,
         resume='allow' if args.resume else False,
         reinit=True,
