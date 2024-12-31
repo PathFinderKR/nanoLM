@@ -10,9 +10,10 @@ import itertools
 import torch
 from torch import optim
 from torch.utils.data import Dataset, DataLoader
-from torch.optim.lr_scheduler import SequentialLR, LinearLR
+from torch.optim.lr_scheduler import SequentialLR, CosineAnnealingLR, LinearLR
 import wandb
-from utils import load_config, set_logging, set_seed, configure_device, load_text, initialize_tokenizer, initialize_model
+from utils import load_config, set_logging, set_seed, configure_device, load_text, initialize_tokenizer, \
+    initialize_model
 from tokenizer import CharTokenizer, BpeTokenizer
 
 
@@ -151,7 +152,7 @@ def setup_optimizer(config: dict, model) -> optim.Optimizer:
     return optimizer
 
 
-def setup_scheduler(config: dict, optimizer: optim.Optimizer) -> SequentialLR | LinearLR:
+def setup_scheduler(config: dict, optimizer: optim.Optimizer) -> SequentialLR | CosineAnnealingLR | LinearLR:
     """
     Sets up the learning rate scheduler based on the configuration.
 
@@ -160,54 +161,85 @@ def setup_scheduler(config: dict, optimizer: optim.Optimizer) -> SequentialLR | 
         optimizer (optim.Optimizer): The optimizer.
 
     Returns:
-        SequentialLR | LinearLR: The instantiated scheduler.
+        torch.optim.lr_scheduler._LRScheduler: The instantiated scheduler.
     """
-    scheduler_type = config['training']['scheduler'].get('type', 'none')  # Default to none
+    scheduler_type = config['training']['scheduler'].get('type', 'none').lower()  # Default to 'none'
     warmup_ratio = config['training']['scheduler'].get('warmup_ratio', 0.0)  # Default to 0.0
     total_steps = config['training']['max_steps']
     warmup_steps = int(warmup_ratio * total_steps)
     remaining_steps = total_steps - warmup_steps
 
     if scheduler_type == 'cosine':
-        scheduler_warmup = optim.lr_scheduler.LinearLR(
-            optimizer,
-            start_factor=1e-5,
-            end_factor=1.0,
-            total_iters=warmup_steps
-        )
-        scheduler_cosine = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=remaining_steps,
-            eta_min=1e-6
-        )
-        scheduler = optim.lr_scheduler.SequentialLR(
-            optimizer,
-            schedulers=[scheduler_warmup, scheduler_cosine],
-            milestones=[warmup_steps]
-        )
+        if warmup_steps > 0:
+            scheduler_warmup = LinearLR(
+                optimizer,
+                start_factor=1.0,
+                end_factor=config['training']['scheduler'].get('eta_min', 1e-6) /
+                           config['training']['optimizer']['params']['lr'],
+                total_iters=warmup_steps
+            )
+            scheduler_cosine = CosineAnnealingLR(
+                optimizer,
+                T_max=remaining_steps,
+                eta_min=config['training']['scheduler'].get('eta_min', 1e-6)
+            )
+            scheduler = SequentialLR(
+                optimizer,
+                schedulers=[scheduler_warmup, scheduler_cosine],
+                milestones=[warmup_steps]
+            )
+            logging.info(
+                f"CosineAnnealingLR scheduler with warmup initialized. Warmup steps: {warmup_steps}, Total steps: {total_steps}.")
+        else:
+            scheduler = CosineAnnealingLR(
+                optimizer,
+                T_max=total_steps,
+                eta_min=config['training']['scheduler'].get('eta_min', 1e-6)
+            )
+            logging.info(f"CosineAnnealingLR scheduler initialized without warmup. Total steps: {total_steps}.")
+
     elif scheduler_type == 'linear':
-        scheduler_warmup = optim.lr_scheduler.LinearLR(
-            optimizer,
-            start_factor=1e-5,
-            end_factor=1.0,
-            total_iters=warmup_steps
-        )
-        scheduler_linear = optim.lr_scheduler.LinearLR(
+        if warmup_steps > 0:
+            scheduler_warmup = LinearLR(
+                optimizer,
+                start_factor=1.0,
+                end_factor=0.0,
+                total_iters=warmup_steps
+            )
+            scheduler_linear = LinearLR(
+                optimizer,
+                start_factor=1.0,
+                end_factor=0.0,
+                total_iters=remaining_steps
+            )
+            scheduler = SequentialLR(
+                optimizer,
+                schedulers=[scheduler_warmup, scheduler_linear],
+                milestones=[warmup_steps]
+            )
+            logging.info(
+                f"LinearLR scheduler with warmup initialized. Warmup steps: {warmup_steps}, Total steps: {total_steps}.")
+        else:
+            scheduler = LinearLR(
+                optimizer,
+                start_factor=1.0,
+                end_factor=0.0,
+                total_iters=total_steps
+            )
+            logging.info(f"LinearLR scheduler initialized without warmup. Total steps: {total_steps}.")
+
+    elif scheduler_type == 'none':
+        scheduler = LinearLR(
             optimizer,
             start_factor=1.0,
-            end_factor=0.0,
-            total_iters=remaining_steps
+            end_factor=1.0,
+            total_iters=1
         )
-        scheduler = optim.lr_scheduler.SequentialLR(
-            optimizer,
-            schedulers=[scheduler_warmup, scheduler_linear],
-            milestones=[warmup_steps]
-        )
-    elif scheduler_type == 'none':
-        scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=1.0, total_iters=total_steps)
+        logging.info("No learning rate scheduler applied; learning rate remains constant.")
+
     else:
         raise ValueError(f"Unsupported scheduler type: {scheduler_type}")
-    logging.info(f"{scheduler_type} scheduler initialized with warmup ratio {warmup_ratio}.")
+
     return scheduler
 
 
