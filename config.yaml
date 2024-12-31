@@ -10,6 +10,7 @@ model:
 tokenizer:
   type: char  # char, bpe, etc.
   vocab_size: 0  # To be updated dynamically based on tokenizer
+  # vocab_path:
 
 training:
   max_steps: 10000

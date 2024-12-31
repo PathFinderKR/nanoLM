@@ -143,7 +143,7 @@ def initialize_tokenizer(config: dict, root_dir: str, tokenizer_type: str):
 
     vocab_path = os.path.join(
         root_dir,
-        config['tokenizer'].get('vocab_path', f'{tokenizer_type}_tokenizer_vocab.json')
+        config['tokenizer'].get('vocab_path', f'{tokenizer_type}_tokenizer.json')
     )
 
     if os.path.exists(vocab_path):
@@ -154,7 +154,7 @@ def initialize_tokenizer(config: dict, root_dir: str, tokenizer_type: str):
         tokenizer.build_vocab(train_text)
         tokenizer.save_vocab(vocab_path)
 
-    logging.info(f"Initialized {tokenizer_type} tokenizer with vocab size {tokenizer.vocab_size}.")
+    logging.info(f"{tokenizer_type} tokenizer initialized with vocab size {tokenizer.vocab_size}.")
     return tokenizer
 
 
@@ -192,7 +192,7 @@ def initialize_model(config: dict, device: torch.device, model_type: str) -> tor
     )
 
     model = model_class(model_config).to(device)
-    logging.info(f"Initialized {model_type} with {model.num_parameters()} trainable parameters.")
+    logging.info(f"{model_type}  initialized with {model.num_parameters()} trainable parameters.")
     return model
 
 

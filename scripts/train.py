@@ -163,7 +163,7 @@ def setup_optimizer(config: dict, model) -> optim.Optimizer:
 
     optimizer_class = optimizer_classes[optimizer_type]
     optimizer = optimizer_class(model.parameters(), **optimizer_params)
-    logging.info(f"Optimizer: {optimizer_type} initialized with parameters: {optimizer_params}.")
+    logging.info(f"{optimizer_type} optimizer initialized with parameters: {optimizer_params}.")
     return optimizer
 
 
@@ -223,7 +223,7 @@ def setup_scheduler(config: dict, optimizer: optim.Optimizer, total_steps: int) 
         scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=1.0, total_iters=total_steps)
     else:
         raise ValueError(f"Unsupported scheduler type: {scheduler_type}")
-    logging.info(f"Scheduler: {scheduler_type} initialized with warmup ratio {warmup_ratio}.")
+    logging.info(f"{scheduler_type} scheduler initialized with warmup ratio {warmup_ratio}.")
     return scheduler
 
 
