@@ -10,7 +10,7 @@ import itertools
 import torch
 from torch import optim
 from torch.utils.data import Dataset, DataLoader
-from torch.optim.lr_scheduler import SequentialLR
+from torch.optim.lr_scheduler import SequentialLR, LinearLR
 import wandb
 from utils import (
     set_seed,
@@ -37,20 +37,6 @@ def parse_args():
     default_config_path = os.path.abspath(os.path.join(script_dir, '..', 'config.yaml'))
 
     parser = argparse.ArgumentParser(description="Train the transformer model on the Tiny Shakespeare dataset.")
-    parser.add_argument(
-        '--model',
-        type=str,
-        default='nanoGPT',
-        choices=['nanoGPT', 'GPT2', 'MEGABYTE', 'N-gram'],
-        help='Model architecture to train on (nanoGPT, GPT2, MEGABYTE, N-gram).'
-    )
-    parser.add_argument(
-        '--tokenizer',
-        type=str,
-        default='char',
-        choices=['char', 'bpe'],
-        help='Tokenizer to use (char, bpe).'
-    )
     parser.add_argument(
         '--config',
         type=str,
@@ -124,7 +110,7 @@ def prepare_data(raw_text: str, config: dict, tokenizer: CharTokenizer) -> Tuple
     logging.info(f"Encoded text into {len(encoded)} tokens.")
 
     val_size = config['data'].get('val_size', 0.1)  # Default to 0.1
-    seed = config['training'].get('seed', 42)
+    seed = config['training'].get('seed', 42)  # Default to 42
     encoded_train, encoded_val = train_test_split(
         encoded,
         test_size=val_size,
@@ -181,7 +167,7 @@ def setup_optimizer(config: dict, model) -> optim.Optimizer:
     return optimizer
 
 
-def setup_scheduler(config: dict, optimizer: optim.Optimizer, total_steps: int) -> SequentialLR:
+def setup_scheduler(config: dict, optimizer: optim.Optimizer, total_steps: int) -> SequentialLR | LinearLR:
     """
     Sets up the learning rate scheduler based on the configuration.
 
@@ -191,7 +177,7 @@ def setup_scheduler(config: dict, optimizer: optim.Optimizer, total_steps: int) 
         total_steps (int): Total number of training steps.
 
     Returns:
-        SequentialLR: The instantiated scheduler.
+        SequentialLR | LinearLR: The instantiated scheduler.
     """
     scheduler_type = config['training']['scheduler'].get('type', 'none')  # Default to none
     warmup_ratio = config['training']['scheduler'].get('warmup_ratio', 0.0)  # Default to 0.0
@@ -241,7 +227,7 @@ def setup_scheduler(config: dict, optimizer: optim.Optimizer, total_steps: int) 
     return scheduler
 
 
-def resume_training(model, optimizer: optim.Optimizer, scheduler: SequentialLR,
+def resume_training(model, optimizer: optim.Optimizer, scheduler: SequentialLR | LinearLR,
                     scaler: torch.cuda.amp.GradScaler, checkpoint_path: str, device: torch.device) \
         -> Union[Tuple[int, float], Tuple[int, None]]:
     """
@@ -328,7 +314,8 @@ def train(
     max_steps = config['training']['max_steps']
     checkpoint_dir = os.path.join(
         os.path.abspath(os.path.join(os.path.dirname(__file__), '..')),
-        config['training']['checkpoint_dir']
+        config['training']['checkpoint_dir'],
+        config['model']['name']
     )
     os.makedirs(checkpoint_dir, exist_ok=True)
     checkpoint_interval = config['training'].get('checkpoint_interval', 1000)  # Default to 1000
@@ -336,13 +323,19 @@ def train(
     log_interval = config['training'].get('log_interval', 100)  # Default to 100
 
     grad_clip = config['training']['grad_clip']
+    if grad_clip > 0:
+        logging.info(f"Gradient clipping enabled with max norm: {grad_clip}")
     mixed_precision = config['training'].get('mixed_precision', True) and device.type == 'cuda'  # Default to True
+    if mixed_precision:
+        logging.info("Mixed precision training enabled.")
 
     # Initialize the GradScaler for mixed precision training
     scaler = torch.cuda.amp.GradScaler(enabled=mixed_precision)
 
     # Create an infinite iterator over the training DataLoader
     train_iterator = itertools.cycle(train_dataloader)
+
+    logging.info("Starting training loop.")
 
     # Initialize a tqdm progress bar for the entire training process
     progress_bar = tqdm(
@@ -353,7 +346,7 @@ def train(
     )
 
     for step in progress_bar:
-        current_step = step + 1  # Adjust step count
+        current_step = step + 1
         inputs, targets = next(train_iterator)
         inputs, targets = inputs.to(device), targets.to(device)
 
@@ -367,7 +360,9 @@ def train(
             scaler.scale(loss).backward()
             # Unscale gradients and perform gradient clipping
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            # Conditionally apply gradient clipping
+            if grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             # Optimizer step with scaled gradients
             scaler.step(optimizer)
             scaler.update()
@@ -375,7 +370,9 @@ def train(
             # Regular forward and backward pass
             loss = model.loss(inputs, targets)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            # Conditionally apply gradient clipping
+            if grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
 
         # Scheduler step
@@ -418,12 +415,10 @@ def train(
                 logging.error(f"Failed to upload checkpoint to WandB: {e}")
 
     # Final validation after training
-    logging.info("Performing final validation after training.")
     val_loss = evaluate(model, val_dataloader, device)
     logging.info(f"Final Validation Loss: {val_loss:.4f}")
-    wandb_run.log({"Final Validation Loss": val_loss})
 
-    logging.info("Training finished.")
+    logging.info("Training complete.")
 
 
 def main():
@@ -437,10 +432,19 @@ def main():
     config = load_config(args.config)
 
     # Validate configuration parameters
-    required_config_keys = ['model', 'training', 'data', 'tokenizer']
+    required_config_keys = ['model', 'tokenizer', 'training', 'data']
+    required_nested_keys = {
+        'model': ['name'],
+        'training': ['max_steps', 'batch_size'],
+        'data': ['train_path'],
+        'tokenizer': ['type']
+    }
     for key in required_config_keys:
         if key not in config:
             raise ValueError(f"Missing required configuration section: {key}")
+        for nested_key in required_nested_keys.get(key, []):
+            if nested_key not in config[key]:
+                raise ValueError(f"Missing required key '{nested_key}' in configuration section '{key}'.")
 
     # Logging configuration
     log_file_path = os.path.join(root_dir, config['training']['log_file'])
@@ -473,7 +477,8 @@ def main():
     logging.info("Weights & Biases initialized.")
 
     # Initialize tokenizer
-    tokenizer = initialize_tokenizer(config, root_dir, args.tokenizer)
+    tokenizer_type = config['tokenizer']['type']
+    tokenizer = initialize_tokenizer(config, root_dir, tokenizer_type)
 
     # Load and prepare data
     train_path = os.path.join(root_dir, config['data']['train_path'])
@@ -484,7 +489,8 @@ def main():
     config['model']['vocab_size'] = tokenizer.vocab_size
 
     # Initialize the GPT model based on the selected model type
-    model = initialize_model(config, device, args.model)
+    model_architecture = config['model']['arch']
+    model = initialize_model(config, device, model_architecture)
 
     # Set up the optimizer
     optimizer = setup_optimizer(config, model)
@@ -524,7 +530,6 @@ def main():
         raise
 
     wandb.finish()
-    logging.info("Training completed successfully.")
 
 
 if __name__ == "__main__":

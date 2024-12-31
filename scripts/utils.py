@@ -8,7 +8,7 @@ import yaml
 import torch
 from typing import Dict, Any
 from tokenizer import CharTokenizer
-from models.nanoGPT import nanoGPT, GPTConfig
+from models.GPT import GPT, GPTConfig
 
 
 def set_seed(seed: int):
@@ -171,9 +171,8 @@ def initialize_model(config: dict, device: torch.device, model_type: str) -> tor
         torch.nn.Module: The initialized model.
     """
     model_classes = {
-        'nanoGPT': nanoGPT
-        # 'GPT2': GPT2,
-        # 'MEGABYTE': MegaByte,
+        'GPT': GPT
+        # 'MEGABYTE': MEGABYTE,
         # 'N-gram': NGram
         # Add other model classes here
     }

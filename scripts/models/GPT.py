@@ -1,4 +1,4 @@
-# scripts/models/nanoGPT.py
+# scripts/models/GPT.py
 
 import torch
 import torch.nn as nn
@@ -150,9 +150,9 @@ def _init_weights(module):
         nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
 
-class nanoGPT(nn.Module):
+class GPT(nn.Module):
     def __init__(self, config: GPTConfig):
-        super(nanoGPT, self).__init__()
+        super(GPT, self).__init__()
         self.config = config
         self.token_embedding = nn.Embedding(config.vocab_size, config.n_embed)
         self.position_embedding = nn.Embedding(config.context_size, config.n_embed)
