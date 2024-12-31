@@ -12,13 +12,7 @@ from torch import optim
 from torch.utils.data import Dataset, DataLoader
 from torch.optim.lr_scheduler import SequentialLR, LinearLR
 import wandb
-from utils import (
-    set_seed,
-    setup_logging,
-    configure_device,
-    load_config,
-    load_text
-)
+from utils import load_config, set_logging, set_seed, configure_device, load_text
 from models.GPT import GPT, GPTConfig
 from tokenizer import CharTokenizer, BpeTokenizer
 
@@ -464,8 +458,6 @@ def main():
 
     # Load the configuration file
     config = load_config(args.config)
-
-    # Validate configuration parameters
     required_config_keys = ['model', 'tokenizer', 'training', 'data']
     required_nested_keys = {
         'model': ['name'],
@@ -480,13 +472,11 @@ def main():
             if nested_key not in config[key]:
                 raise ValueError(f"Missing required key '{nested_key}' in configuration section '{key}'.")
 
-    # Logging configuration
-    setup_logging(os.path.join(root_dir, config['training']['log_file']))
-
+    # Set logging
+    set_logging(os.path.join(root_dir, config['training']['log_file']))
     # Set the random seed for reproducibility
     set_seed(config['training'].get('seed', 42))  # Default to 42
-
-    # Device configuration
+    # Automatic device configuration
     device = configure_device()
 
     # Debug mode
@@ -505,7 +495,6 @@ def main():
         reinit=True,
         dir=root_dir
     )
-    wandb_run = wandb.run
     logging.info("Weights & Biases initialized.")
 
     # Initialize tokenizer and model
@@ -530,11 +519,11 @@ def main():
             scheduler,
             config,
             device,
-            wandb_run,
+            wandb.run
         )
     except Exception as e:
         logging.error(f"An error occurred during training: {e}")
-        wandb_run.finish(early=True)
+        wandb.run.finish(early=True)
         raise
 
     wandb.finish()

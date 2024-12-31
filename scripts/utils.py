@@ -5,30 +5,25 @@ import random
 import numpy as np
 import os
 import yaml
-from typing import Tuple
 import torch
-from tokenizer import CharTokenizer
-from models.GPT import GPT, GPTConfig
 
 
-def set_seed(seed: int):
+def load_config(config_path: str) -> dict:
     """
-    Set the random seed for reproducibility.
+    Loads the training configuration from a YAML file.
 
     Args:
-        seed (int): The seed value to set.
+        config_path (str): Path to the YAML configuration file.
+
+    Returns:
+        dict: Configuration parameters.
     """
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    logging.info(f"Random seed set to {seed}.")
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
 
 
-def setup_logging(log_file_path: str, log_level: int = logging.INFO):
+def set_logging(log_file_path: str, log_level: int = logging.INFO):
     """
     Configures logging to write to both a file and the console.
 
@@ -60,6 +55,23 @@ def setup_logging(log_file_path: str, log_level: int = logging.INFO):
     logging.info(f"Logging to file: {log_file_path}")
 
 
+def set_seed(seed: int):
+    """
+    Set the random seed for reproducibility.
+
+    Args:
+        seed (int): The seed value to set.
+    """
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    logging.info(f"Random seed set to {seed}.")
+
+
 def configure_device() -> torch.device:
     """
     Configure the device for training.
@@ -78,22 +90,6 @@ def configure_device() -> torch.device:
         device = torch.device("cpu")
         logging.info("Running on CPU")
     return device
-
-
-def load_config(config_path: str) -> dict:
-    """
-    Loads the training configuration from a YAML file.
-
-    Args:
-        config_path (str): Path to the YAML configuration file.
-
-    Returns:
-        dict: Configuration parameters.
-    """
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    logging.info(f"Loaded configuration from {config_path}.")
-    return config
 
 
 def load_text(file_path: str, encoding: str = 'utf-8') -> str:
