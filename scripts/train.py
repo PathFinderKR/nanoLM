@@ -12,8 +12,7 @@ from torch import optim
 from torch.utils.data import Dataset, DataLoader
 from torch.optim.lr_scheduler import SequentialLR, LinearLR
 import wandb
-from utils import load_config, set_logging, set_seed, configure_device, load_text
-from models.GPT import GPT, GPTConfig
+from utils import load_config, set_logging, set_seed, configure_device, load_text, initialize_tokenizer, initialize_model
 from tokenizer import CharTokenizer, BpeTokenizer
 
 
@@ -121,86 +120,6 @@ def prepare_data(raw_text: str, config: dict, tokenizer: CharTokenizer | BpeToke
         pin_memory=True
     )
     return train_dataloader, val_dataloader
-
-
-def initialize_tokenizer(config: dict, root_dir: str, tokenizer_type: str) -> CharTokenizer | BpeTokenizer:
-    """
-    Initializes the tokenizer by loading the vocabulary from a file or building it if not present.
-
-    Args:
-        config (dict): Configuration parameters.
-        root_dir (str): The root directory of the repository.
-        tokenizer_type (str): The type of tokenizer to initialize (e.g., 'char', 'bpe').
-
-    Returns:
-        Tokenizer: The initialized tokenizer.
-    """
-    tokenizer_classes = {
-        'char': CharTokenizer,
-        # 'bpe': BpeTokenizer
-    }
-
-    if tokenizer_type not in tokenizer_classes:
-        raise ValueError(f"Unsupported tokenizer type: {tokenizer_type}")
-
-    tokenizer_class = tokenizer_classes[tokenizer_type]
-    tokenizer = tokenizer_class()
-
-    vocab_path = os.path.join(
-        root_dir,
-        config['tokenizer'].get('vocab_path', f'{tokenizer_type}_tokenizer.json')
-    )
-
-    if os.path.exists(vocab_path):
-        tokenizer.load_vocab(vocab_path)
-    else:
-        train_path = os.path.join(root_dir, config['data']['train_path'])
-        train_text = load_text(train_path)
-        tokenizer.build_vocab(train_text)
-        tokenizer.save_vocab(vocab_path)
-
-    config['model']['vocab_size'] = tokenizer.vocab_size
-
-    logging.info(f"{tokenizer_type} tokenizer initialized with vocab size {tokenizer.vocab_size}.")
-    return tokenizer
-
-
-def initialize_model(config: dict, device: torch.device, model_type: str) -> torch.nn.Module:
-    """
-    Initializes the model based on the specified type.
-
-    Args:
-        config (dict): Configuration parameters.
-        device (torch.device): The device to run the model on.
-        model_type (str): The type of model to initialize (e.g., 'nanoGPT', 'GPT2').
-
-    Returns:
-        torch.nn.Module: The initialized model.
-    """
-    model_classes = {
-        'GPT': GPT
-        # 'MEGABYTE': MEGABYTE,
-        # 'N-gram': NGram
-        # Add other model classes here
-    }
-
-    if model_type not in model_classes:
-        raise ValueError(f"Unsupported model type: {model_type}")
-
-    model_class = model_classes[model_type]
-
-    model_config = GPTConfig(
-        vocab_size=config['model']['vocab_size'],
-        context_size=config['model']['context_size'],
-        n_layer=config['model']['n_layer'],
-        n_head=config['model']['n_head'],
-        n_embed=config['model']['n_embed'],
-        dropout=config['model']['dropout']
-    )
-
-    model = model_class(model_config).to(device)
-    logging.info(f"{model_type} initialized with {model.num_parameters()} trainable parameters.")
-    return model
 
 
 def setup_optimizer(config: dict, model) -> optim.Optimizer:
@@ -462,7 +381,7 @@ def main():
     config = load_config(args.config)
     required_config_keys = ['model', 'tokenizer', 'training', 'data']
     required_nested_keys = {
-        'model': ['name'],
+        'model': ['name', 'arch', 'context_size', 'n_layer', 'n_head', 'n_embed', 'dropout'],
         'training': ['max_steps', 'batch_size'],
         'data': ['train_path'],
         'tokenizer': ['type']
@@ -498,9 +417,11 @@ def main():
     )
     logging.info("Weights & Biases initialized.")
 
-    # Initialize tokenizer and model
-    tokenizer = initialize_tokenizer(config, root_dir, config['tokenizer']['type'])
-    model = initialize_model(config, device, config['model']['arch'])
+    # Initialize tokenizer
+    tokenizer = initialize_tokenizer(config, root_dir)
+
+    # Initialize model
+    model = initialize_model(config, device)
 
     # Load and prepare data
     raw_text = load_text(os.path.join(root_dir, config['data']['train_path']))

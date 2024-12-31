@@ -214,7 +214,7 @@ class GPT(nn.Module):
         return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
     @torch.no_grad()
-    def generate(self, prompt, max_new_tokens, tokenizer, device, temperature=1.0):
+    def generate(self, tokenizer, prompt, max_new_tokens, device, temperature=1.0):
         """
         Generate text using the GPT model.
 

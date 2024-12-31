@@ -9,11 +9,11 @@ model:
 
 tokenizer:
   type: char  # char, bpe, etc.
-  vocab_size: 0  # To be updated dynamically based on tokenizer
-  # vocab_path:
+  vocab_size: 67
+  vocab_path: char_tokenizer.json
 
 training:
-  max_steps: 10000
+  max_steps: 1000
   batch_size: 128
   optimizer:
     type: AdamW  # SGD, Adam, AdamW, etc.
@@ -25,8 +25,8 @@ training:
     warmup_ratio: 0
   grad_clip: 0
   mixed_precision: False
-  validation_interval: 1000
-  checkpoint_interval: 1000
+  validation_interval: 100
+  checkpoint_interval: 100
   checkpoint_dir: checkpoints
   log_interval: 100
   log_file: logs/training.logs
@@ -35,6 +35,14 @@ training:
 data:
   train_path: data/raw/shakespeare.txt
   val_size: 0.1
+
+generation:
+  model_path: checkpoints/nanoGPT/step_1000.pth
+  prompt: "To be or not to be, that is the question."
+  max_new_tokens: 1000
+  temperature: 1.0
+  log_file: logs/generation.logs
+  seed: 42
 
 wandb:
   project: nanoGPT

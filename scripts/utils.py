@@ -6,6 +6,8 @@ import numpy as np
 import os
 import yaml
 import torch
+from tokenizer import CharTokenizer, BpeTokenizer
+from models.GPT import GPT, GPTConfig
 
 
 def load_config(config_path: str) -> dict:
@@ -112,3 +114,83 @@ def load_text(file_path: str, encoding: str = 'utf-8') -> str:
 
     logging.info(f"Loaded text data from {file_path} (length: {len(text)} characters).")
     return text
+
+
+def initialize_tokenizer(config: dict, root_dir: str) -> CharTokenizer | BpeTokenizer:
+    """
+    Initializes the tokenizer by loading the vocabulary from a file or building it if not present.
+
+    Args:
+        config (dict): Configuration parameters.
+        root_dir (str): The root directory of the repository.
+
+    Returns:
+        Tokenizer: The initialized tokenizer.
+    """
+    tokenizer_classes = {
+        'char': CharTokenizer,
+        # 'bpe': BpeTokenizer
+    }
+
+    tokenizer_type = config['tokenizer']['type']
+    if tokenizer_type not in tokenizer_classes:
+        raise ValueError(f"Unsupported tokenizer type: {tokenizer_type}")
+
+    tokenizer_class = tokenizer_classes[tokenizer_type]
+    tokenizer = tokenizer_class()
+
+    vocab_path = os.path.join(
+        root_dir,
+        config['tokenizer'].get('vocab_path', f'{tokenizer_type}_tokenizer.json')
+    )
+
+    if os.path.exists(vocab_path):
+        tokenizer.load_vocab(vocab_path)
+    else:
+        train_path = os.path.join(root_dir, config['data']['train_path'])
+        train_text = load_text(train_path)
+        tokenizer.build_vocab(train_text)
+        tokenizer.save_vocab(vocab_path)
+
+    config['model']['vocab_size'] = tokenizer.vocab_size
+
+    logging.info(f"{tokenizer_type} tokenizer initialized with vocab size {tokenizer.vocab_size}.")
+    return tokenizer
+
+
+def initialize_model(config: dict, device: torch.device) -> torch.nn.Module:
+    """
+    Initializes the model based on the specified type.
+
+    Args:
+        config (dict): Configuration parameters.
+        device (torch.device): The device to run the model on.
+
+    Returns:
+        torch.nn.Module: The initialized model.
+    """
+    model_classes = {
+        'GPT': GPT
+        # 'MEGABYTE': MEGABYTE,
+        # 'N-gram': NGram
+        # Add other model classes here
+    }
+
+    model_arch = config['model']['arch']
+    if model_arch not in model_classes:
+        raise ValueError(f"Unsupported model type: {model_arch}")
+
+    model_class = model_classes[model_arch]
+
+    model_config = GPTConfig(
+        vocab_size=config['model']['vocab_size'],
+        context_size=config['model']['context_size'],
+        n_layer=config['model']['n_layer'],
+        n_head=config['model']['n_head'],
+        n_embed=config['model']['n_embed'],
+        dropout=config['model'].get('dropout', 0.1)  # Default to 0.1
+    )
+
+    model = model_class(model_config).to(device)
+    logging.info(f"{model_arch} initialized with {model.num_parameters()} trainable parameters.")
+    return model
