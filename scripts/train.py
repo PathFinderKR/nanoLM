@@ -322,7 +322,7 @@ def train(
     validation_interval = config['training'].get('validation_interval', 1000)  # Default to 1000
     log_interval = config['training'].get('log_interval', 100)  # Default to 100
 
-    grad_clip = config['training']['grad_clip']
+    grad_clip = config['training'].get('grad_clip', 0)  # Default to 0
     if grad_clip > 0:
         logging.info(f"Gradient clipping enabled with max norm: {grad_clip}")
     mixed_precision = config['training'].get('mixed_precision', True) and device.type == 'cuda'  # Default to True
