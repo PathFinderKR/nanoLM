@@ -143,7 +143,7 @@ def initialize_tokenizer(config: dict, root_dir: str, tokenizer_type: str):
 
     vocab_path = os.path.join(
         root_dir,
-        config['tokenizer'].get('vocab_path', f'tokenizer_vocab_{tokenizer_type}.json')
+        config['tokenizer'].get('vocab_path', f'{tokenizer_type}_tokenizer_vocab.json')
     )
 
     if os.path.exists(vocab_path):
