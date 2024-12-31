@@ -135,21 +135,6 @@ class DecoderLayer(nn.Module):
         return x
 
 
-def _init_weights(module):
-    """
-    Initialize weights of the model.
-
-    Args:
-        module (nn.Module): The module to initialize.
-    """
-    if isinstance(module, nn.Linear):
-        nn.init.xavier_uniform_(module.weight)
-        if module.bias is not None:
-            nn.init.zeros_(module.bias)
-    elif isinstance(module, nn.Embedding):
-        nn.init.normal_(module.weight, mean=0.0, std=0.02)
-
-
 class GPT(nn.Module):
     def __init__(self, config: GPTConfig):
         super(GPT, self).__init__()
@@ -160,8 +145,6 @@ class GPT(nn.Module):
         self.layers = nn.ModuleList([DecoderLayer(config) for _ in range(config.n_layer)])
         self.ln_f = LayerNorm(config.n_embed)
         self.linear = nn.Linear(config.n_embed, config.vocab_size, bias=False)
-
-        self.apply(_init_weights)
 
     def num_parameters(self):
         """

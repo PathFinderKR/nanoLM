@@ -23,7 +23,7 @@ training:
   scheduler:
     type: cosine
     warmup_ratio: 0
-  grad_clip: 0
+  grad_clip: 1.0
   mixed_precision: False
   validation_interval: 1000
   checkpoint_interval: 1000
@@ -37,7 +37,7 @@ data:
   val_size: 0.1
 
 generation:
-  model_path: checkpoints/nanoGPT/step_1000.pth
+  model_path: checkpoints/nanoGPT/step_5000.pth
   prompt: "To be or not to be, that is the question."
   max_new_tokens: 1000
   temperature: 1.0
