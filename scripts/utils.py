@@ -190,7 +190,7 @@ def initialize_model(config: dict, device: torch.device) -> torch.nn.Module:
         n_embed=config['model']['n_embed'],
         dropout=config['model'].get('dropout', 0.1)  # Default to 0.1
     )
-
     model = model_class(model_config).to(device)
+
     logging.info(f"{model_arch} initialized with {model.num_parameters()} trainable parameters.")
     return model
