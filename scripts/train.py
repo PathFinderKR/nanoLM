@@ -159,6 +159,8 @@ def initialize_tokenizer(config: dict, root_dir: str, tokenizer_type: str) -> Ch
         tokenizer.build_vocab(train_text)
         tokenizer.save_vocab(vocab_path)
 
+    config['model']['vocab_size'] = tokenizer.vocab_size
+
     logging.info(f"{tokenizer_type} tokenizer initialized with vocab size {tokenizer.vocab_size}.")
     return tokenizer
 
@@ -197,7 +199,7 @@ def initialize_model(config: dict, device: torch.device, model_type: str) -> tor
     )
 
     model = model_class(model_config).to(device)
-    logging.info(f"{model_type}  initialized with {model.num_parameters()} trainable parameters.")
+    logging.info(f"{model_type} initialized with {model.num_parameters()} trainable parameters.")
     return model
 
 
@@ -372,7 +374,7 @@ def train(
     model.train()
     logging.info("Starting training loop.")
 
-    progress_bar = tqdm(range(1, max_steps), desc="Training", total=max_steps-1, initial=1)
+    progress_bar = tqdm(range(1, max_steps), desc="Training", total=max_steps, initial=1)
     for step in progress_bar:
         current_step = step + 1
         inputs, targets = next(train_iterator)
@@ -491,7 +493,6 @@ def main():
         project=config.get('wandb', {}).get('project', 'default_project'),
         entity=config.get('wandb', {}).get('entity', None),
         config=config,
-        resume='allow' if args.resume else False,
         reinit=True,
         dir=root_dir
     )
