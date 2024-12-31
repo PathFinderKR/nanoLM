@@ -247,3 +247,25 @@ class GPT(nn.Module):
             generated.append(next_id)
 
         return tokenizer.decode(generated)
+
+    def save_checkpoint(self, path):
+        """
+        Save the training checkpoint.
+
+        Args:
+            path (str): Path to save the checkpoint.
+        """
+        torch.save(self.state_dict(), path)
+
+    def load_checkpoint(self, path):
+        """
+        Load the training checkpoint.
+
+        Args:
+            path (str): Path to load the checkpoint.
+        """
+
+        self.load_state_dict(torch.load(path))
+        self.eval()
+        self.to(next(self.parameters()).device)
+        return self

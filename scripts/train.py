@@ -4,7 +4,7 @@ import argparse
 import logging
 import os
 from tqdm import tqdm
-from typing import Tuple, Union
+from typing import Tuple
 from sklearn.model_selection import train_test_split
 import itertools
 import torch
@@ -17,12 +17,9 @@ from utils import (
     setup_logging,
     configure_device,
     load_config,
-    load_text,
-    initialize_tokenizer,
-    initialize_model,
-    save_checkpoint,
-    load_checkpoint
+    load_text
 )
+from models.GPT import GPT, GPTConfig
 from tokenizer import CharTokenizer, BpeTokenizer
 
 
@@ -42,12 +39,6 @@ def parse_args():
         type=str,
         default=default_config_path,
         help=f'Path to the configuration YAML file. Defaults to {default_config_path}'
-    )
-    parser.add_argument(
-        '--resume',
-        type=str,
-        default=None,
-        help='Path to resume training from a checkpoint.'
     )
     parser.add_argument(
         '--debug',
@@ -136,6 +127,84 @@ def prepare_data(raw_text: str, config: dict, tokenizer: CharTokenizer | BpeToke
         pin_memory=True
     )
     return train_dataloader, val_dataloader
+
+
+def initialize_tokenizer(config: dict, root_dir: str, tokenizer_type: str) -> CharTokenizer | BpeTokenizer:
+    """
+    Initializes the tokenizer by loading the vocabulary from a file or building it if not present.
+
+    Args:
+        config (dict): Configuration parameters.
+        root_dir (str): The root directory of the repository.
+        tokenizer_type (str): The type of tokenizer to initialize (e.g., 'char', 'bpe').
+
+    Returns:
+        Tokenizer: The initialized tokenizer.
+    """
+    tokenizer_classes = {
+        'char': CharTokenizer,
+        # 'bpe': BpeTokenizer
+    }
+
+    if tokenizer_type not in tokenizer_classes:
+        raise ValueError(f"Unsupported tokenizer type: {tokenizer_type}")
+
+    tokenizer_class = tokenizer_classes[tokenizer_type]
+    tokenizer = tokenizer_class()
+
+    vocab_path = os.path.join(
+        root_dir,
+        config['tokenizer'].get('vocab_path', f'{tokenizer_type}_tokenizer.json')
+    )
+
+    if os.path.exists(vocab_path):
+        tokenizer.load_vocab(vocab_path)
+    else:
+        train_path = os.path.join(root_dir, config['data']['train_path'])
+        train_text = load_text(train_path)
+        tokenizer.build_vocab(train_text)
+        tokenizer.save_vocab(vocab_path)
+
+    logging.info(f"{tokenizer_type} tokenizer initialized with vocab size {tokenizer.vocab_size}.")
+    return tokenizer
+
+
+def initialize_model(config: dict, device: torch.device, model_type: str) -> torch.nn.Module:
+    """
+    Initializes the model based on the specified type.
+
+    Args:
+        config (dict): Configuration parameters.
+        device (torch.device): The device to run the model on.
+        model_type (str): The type of model to initialize (e.g., 'nanoGPT', 'GPT2').
+
+    Returns:
+        torch.nn.Module: The initialized model.
+    """
+    model_classes = {
+        'GPT': GPT
+        # 'MEGABYTE': MEGABYTE,
+        # 'N-gram': NGram
+        # Add other model classes here
+    }
+
+    if model_type not in model_classes:
+        raise ValueError(f"Unsupported model type: {model_type}")
+
+    model_class = model_classes[model_type]
+
+    model_config = GPTConfig(
+        vocab_size=config['model']['vocab_size'],
+        context_size=config['model']['context_size'],
+        n_layer=config['model']['n_layer'],
+        n_head=config['model']['n_head'],
+        n_embed=config['model']['n_embed'],
+        dropout=config['model']['dropout']
+    )
+
+    model = model_class(model_config).to(device)
+    logging.info(f"{model_type}  initialized with {model.num_parameters()} trainable parameters.")
+    return model
 
 
 def setup_optimizer(config: dict, model) -> optim.Optimizer:
@@ -227,37 +296,6 @@ def setup_scheduler(config: dict, optimizer: optim.Optimizer) -> SequentialLR | 
     return scheduler
 
 
-def resume_training(model, optimizer: optim.Optimizer, scheduler: SequentialLR | LinearLR,
-                    config: dict, checkpoint_path: str, device: torch.device) \
-        -> Union[Tuple[int, float], Tuple[int, None]]:
-    """
-    Optionally resumes training from a checkpoint if a path is provided.
-
-    Args:
-        model (torch.nn.Module): The model.
-        optimizer (optim.Optimizer): The optimizer.
-        scheduler (SequentialLR): The scheduler.
-        config (dict): Configuration parameters.
-        checkpoint_path (str): Path to the checkpoint file.
-        device (torch.device): The device to load the checkpoint on.
-
-    Returns:
-        Union[Tuple[int, float], Tuple[int, None]]: The starting step and loss value.
-    """
-    if checkpoint_path:
-        checkpoint = load_checkpoint(model, optimizer, scheduler, checkpoint_path, device)
-        start_step = checkpoint.get('step', 0) + 1  # Start from the next step after the checkpoint
-        loss = checkpoint.get('loss', None)
-
-        if loss is not None:
-            logging.info(f"Resuming training from step {start_step} with loss {loss:.4f}.")
-            return start_step, loss
-        else:
-            logging.warning(f"'loss' not found in checkpoint {checkpoint_path}.")
-            return start_step, None
-    return 0, None
-
-
 def evaluate(model, dataloader: DataLoader, device: torch.device) -> float:
     """
     Evaluates the model on the validation dataset.
@@ -293,9 +331,8 @@ def train(
         optimizer: optim.Optimizer,
         scheduler: SequentialLR,
         config: dict,
-        start_step: int,
-        wandb_run: wandb.sdk.wandb_run.Run,
         device: torch.device,
+        wandb_run: wandb.sdk.wandb_run.Run,
 ):
     """
     The main training loop for the GPT model, including validation.
@@ -309,7 +346,6 @@ def train(
         config (dict): Configuration parameters.
         device (torch.device): The device to run training on.
         wandb_run (wandb.sdk.wandb_run.Run): The Weights & Biases run instance.
-        start_step (int): The step to start training from.
     """
     max_steps = config['training']['max_steps']
 
@@ -338,19 +374,17 @@ def train(
     # Create an infinite iterator over the training DataLoader
     train_iterator = itertools.cycle(train_dataloader)
 
+    # Set the model to training mode
+    model.train()
     logging.info("Starting training loop.")
 
-    progress_bar = tqdm(
-        range(start_step, max_steps),
-        desc="Training",
-        total=max_steps - start_step,
-        initial=start_step
-    )
+    progress_bar = tqdm(range(1, max_steps), desc="Training", total=max_steps-1, initial=1)
     for step in progress_bar:
         current_step = step + 1
         inputs, targets = next(train_iterator)
         inputs, targets = inputs.to(device), targets.to(device)
 
+        # Zero out the gradients
         optimizer.zero_grad()
 
         if mixed_precision:
@@ -399,7 +433,6 @@ def train(
 
         # Perform validation at specified intervals
         if current_step % validation_interval == 0:
-            logging.info(f"Performing validation at step {current_step}.")
             val_loss = evaluate(model, val_dataloader, device)
             logging.info(f"Validation Loss at step {current_step}: {val_loss:.4f}")
             wandb_run.log({"Validation Loss": val_loss, "Step": current_step})
@@ -407,7 +440,7 @@ def train(
         # Save checkpoint at specified intervals
         if current_step % checkpoint_interval == 0:
             checkpoint_path = os.path.join(checkpoint_dir, f'step_{current_step}.pth')
-            save_checkpoint(model, optimizer, scheduler, current_step, loss.item(), checkpoint_path)
+            model.save_checkpoint(checkpoint_path)
             logging.info(f"Checkpoint saved at {checkpoint_path}.")
             try:
                 wandb_run.save(checkpoint_path)
@@ -487,12 +520,6 @@ def main():
     optimizer = setup_optimizer(config, model)
     scheduler = setup_scheduler(config, optimizer)
 
-    # Optionally resume training from a checkpoint
-    if args.resume:
-        start_step, loss = resume_training(model, optimizer, scheduler, config, args.resume, device)
-    else:
-        start_step, loss = 0, None
-
     # Train the model
     try:
         train(
@@ -502,9 +529,8 @@ def main():
             optimizer,
             scheduler,
             config,
-            start_step,
+            device,
             wandb_run,
-            device
         )
     except Exception as e:
         logging.error(f"An error occurred during training: {e}")
